@@ -1,0 +1,29 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Archivos de entorno y configuracion local
+.env
+
+# Secretos y claves
+secrets/
+*.pem
+*.key
+
+# Testing y covertura
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Herramientas de desarrollo
+.vscode/
+.idea/
+claude.md
