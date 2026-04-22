@@ -87,9 +87,10 @@ class JWTSettings(BaseSettings):
 
 
 class OpenAISettings(BaseSettings):
-    """Configuración del cliente OpenAI."""
+    """Configuración del cliente OpenAI (o alternativas compatibles como Groq)."""
 
     openai_api_key: str = Field(min_length=10)
+    openai_base_url: str | None = None
     openai_model: str = "gpt-3.5-turbo"
     openai_max_tokens: int = Field(default=8000, ge=100, le=16000)
     openai_timeout_seconds: int = Field(default=60, ge=10, le=300)

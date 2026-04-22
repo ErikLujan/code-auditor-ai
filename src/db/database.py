@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from src.core.config import get_settings
 from src.core.exceptions import DatabaseError
 from src.core.logging import get_logger
@@ -55,21 +57,27 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     Dependency de FastAPI que provee una sesión de base de datos.
 
     Maneja commit/rollback automáticamente y cierra la sesión
-    al finalizar cada request.
+    al finalizar cada request. Deja pasar errores HTTP originales.
 
     Yields:
         AsyncSession activa para la request.
 
     Raises:
-        DatabaseError: Si ocurre un error durante la transacción.
+        DatabaseError: Solo si ocurre un error estrictamente de la base de datos.
     """
     async with AsyncSessionFactory() as session:
         try:
             yield session
             await session.commit()
-        except Exception as exc:
+            
+        except SQLAlchemyError as exc:
             await session.rollback()
             logger.error("db_session_error", error=str(exc))
-            raise DatabaseError(f"Error en transacción: {exc}") from exc
+            raise DatabaseError(f"Error de base de datos: {exc}") from exc
+            
+        except Exception as exc:
+            await session.rollback()
+            raise 
+            
         finally:
             await session.close()
