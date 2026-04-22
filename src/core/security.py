@@ -28,22 +28,19 @@ from src.core.logging import get_logger
 logger = get_logger(__name__)
 settings = get_settings()
 
-# Contexto de hashing — bcrypt con factor de costo 12
 _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=12, bcrypt__ident="2b")
 
-# Patrón estricto de URL GitHub: solo https, owner/repo válidos
 _GITHUB_URL_PATTERN = re.compile(
     r"^https://github\.com/[a-zA-Z0-9]([a-zA-Z0-9\-]{0,37}[a-zA-Z0-9])?/[a-zA-Z0-9_\-\.]{1,100}$"
 )
 
-# Caracteres/secuencias peligrosas para inyección de prompts
 _PROMPT_INJECTION_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"ignore\s+(previous|above|all)\s+instructions?", re.IGNORECASE),
     re.compile(r"you\s+are\s+now", re.IGNORECASE),
     re.compile(r"(system|assistant|user)\s*:", re.IGNORECASE),
     re.compile(r"<\s*(system|instruction|prompt)\s*>", re.IGNORECASE),
     re.compile(r"\[INST\]|\[/INST\]"),
-    re.compile(r"#{3,}"),  # Múltiples # usados para romper contexto
+    re.compile(r"#{3,}"),
 ]
 
 
@@ -239,10 +236,8 @@ def sanitize_code_for_prompt(code: str, max_tokens: int = 4000) -> str:
     if not code:
         return ""
 
-    # Normalizar unicode — elimina caracteres de control ocultos
     normalized = unicodedata.normalize("NFKC", code)
 
-    # Detectar intentos de inyección
     for pattern in _PROMPT_INJECTION_PATTERNS:
         if pattern.search(normalized):
             logger.warning("prompt_injection_attempt_detected", pattern=pattern.pattern)
@@ -251,7 +246,6 @@ def sanitize_code_for_prompt(code: str, max_tokens: int = 4000) -> str:
                 field="code_content",
             )
 
-    # Truncar por aproximación de tokens (4 chars ≈ 1 token)
     max_chars = max_tokens * 4
     if len(normalized) > max_chars:
         logger.info("code_truncated_for_prompt", original_chars=len(normalized), max_chars=max_chars)
@@ -280,7 +274,6 @@ def sanitize_string_input(value: str, max_length: int = 500, field_name: str = "
     if not value:
         return ""
 
-    # Eliminar caracteres de control excepto newline y tab
     cleaned = "".join(
         ch for ch in value
         if unicodedata.category(ch) not in {"Cc", "Cf"} or ch in {"\n", "\t"}

@@ -5,9 +5,10 @@ Provee registro de usuarios, login con JWT y renovación
 de tokens. Todos los endpoints son públicos (sin auth requerida).
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.api.deps import RateLimiter
 from src.api.schemas.auth_schemas import (
     TokenRefreshRequest,
     TokenResponse,
@@ -30,12 +31,12 @@ from src.db.repositories import UserRepository
 logger = get_logger(__name__)
 router = APIRouter(prefix="/auth", tags=["Autenticación"])
 
-
 @router.post(
     "/register",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Registrar nuevo usuario",
+    dependencies=[Depends(RateLimiter(requests=5, window_seconds=3600))]
 )
 async def register(
     payload: UserRegisterRequest,
@@ -83,6 +84,7 @@ async def register(
     "/login",
     response_model=TokenResponse,
     summary="Iniciar sesión",
+    dependencies=[Depends(RateLimiter(requests=5, window_seconds=60))]
 )
 async def login(
     payload: UserLoginRequest,
@@ -106,7 +108,6 @@ async def login(
     repo = UserRepository(session)
     user = await repo.get_by_email(payload.email)
 
-    # Mensaje genérico para evitar user enumeration attack
     invalid_credentials_error = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Credenciales inválidas",
@@ -132,6 +133,7 @@ async def login(
     "/refresh",
     response_model=TokenResponse,
     summary="Renovar access token",
+    dependencies=[Depends(RateLimiter(requests=10, window_seconds=60))]
 )
 async def refresh_token(
     payload: TokenRefreshRequest,

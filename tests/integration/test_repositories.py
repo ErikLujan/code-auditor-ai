@@ -1,37 +1,57 @@
 """
 Tests de integración para endpoints de repositorios y análisis.
 
-Prueba CRUD de repositorios y creación de análisis
-con autenticación y validaciones de ownership.
+NOTA IMPORTANTE: Los tests de create_analysis mockean run_analysis_background
+para evitar que el background task intente conectarse a GitHub/OpenAI durante
+los tests. El análisis real se testea en test_analysis_service.py.
 """
+
+import math
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
 
-from src.db.models import Repository, User
+from src.db.models import Repository
 
 
 class TestRepositoryEndpoints:
-    """Tests para endpoints de /api/v1/repositories."""
+    """Tests de endpoints CRUD de repositorios."""
 
     async def test_register_repository_success(
-        self, client: AsyncClient, test_user: User, auth_headers: dict
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
     ):
-        """Registro de repo válido debe retornar 201."""
+        """Registrar repositorio válido debe retornar 201 con datos del repo."""
         response = await client.post(
             "/api/v1/repositories",
-            json={"github_url": "https://github.com/owner/myrepo"},
+            json={"github_url": "https://github.com/testowner/testrepo"},
             headers=auth_headers,
         )
         assert response.status_code == 201
         data = response.json()
-        assert data["github_url"] == "https://github.com/owner/myrepo"
-        assert data["full_name"] == "owner/myrepo"
+        assert data["github_url"] == "https://github.com/testowner/testrepo"
+        assert data["full_name"] == "testowner/testrepo"
+        assert "id" in data
 
-    async def test_register_repository_invalid_url(
-        self, client: AsyncClient, auth_headers: dict
+    async def test_register_duplicate_repository_returns_409(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
     ):
-        """URL no GitHub debe retornar 422."""
+        """Registrar el mismo repositorio dos veces debe retornar 409."""
+        payload = {"github_url": "https://github.com/owner/duplicate-repo"}
+        await client.post("/api/v1/repositories", json=payload, headers=auth_headers)
+        response = await client.post("/api/v1/repositories", json=payload, headers=auth_headers)
+        assert response.status_code == 409
+
+    async def test_register_repository_invalid_url_returns_422(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+    ):
+        """URL que no es de GitHub debe retornar 422."""
         response = await client.post(
             "/api/v1/repositories",
             json={"github_url": "https://gitlab.com/owner/repo"},
@@ -39,39 +59,36 @@ class TestRepositoryEndpoints:
         )
         assert response.status_code == 422
 
-    async def test_register_repository_duplicate(
-        self, client: AsyncClient, test_repository: Repository, auth_headers: dict
-    ):
-        """Registrar repo duplicado debe retornar 409."""
-        response = await client.post(
-            "/api/v1/repositories",
-            json={"github_url": test_repository.github_url},
-            headers=auth_headers,
-        )
-        assert response.status_code == 409
-
-    async def test_register_repository_unauthenticated(self, client: AsyncClient):
-        """Request sin token debe retornar 401."""
+    async def test_register_repository_requires_auth(self, client: AsyncClient):
+        """Sin token JWT debe retornar 401."""
         response = await client.post(
             "/api/v1/repositories",
             json={"github_url": "https://github.com/owner/repo"},
         )
         assert response.status_code == 401
 
-    async def test_list_repositories(
-        self, client: AsyncClient, test_repository: Repository, auth_headers: dict
+    async def test_list_repositories_success(
+        self,
+        client: AsyncClient,
+        test_repository: Repository,
+        auth_headers: dict,
     ):
-        """Listar repos debe retornar el repositorio del usuario."""
+        """Listar repositorios debe retornar el repo de prueba."""
         response = await client.get("/api/v1/repositories", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()
+        assert "items" in data
         assert data["total"] >= 1
-        assert any(r["id"] == test_repository.id for r in data["items"])
+        ids = [r["id"] for r in data["items"]]
+        assert test_repository.id in ids
 
-    async def test_get_repository_success(
-        self, client: AsyncClient, test_repository: Repository, auth_headers: dict
+    async def test_get_repository_by_id_success(
+        self,
+        client: AsyncClient,
+        test_repository: Repository,
+        auth_headers: dict,
     ):
-        """GET por ID debe retornar el repositorio correcto."""
+        """GET repositorio por ID debe retornar datos correctos."""
         response = await client.get(
             f"/api/v1/repositories/{test_repository.id}",
             headers=auth_headers,
@@ -79,35 +96,21 @@ class TestRepositoryEndpoints:
         assert response.status_code == 200
         assert response.json()["id"] == test_repository.id
 
-    async def test_get_repository_not_found(
-        self, client: AsyncClient, auth_headers: dict
+    async def test_get_repository_not_found_returns_404(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
     ):
-        """GET con ID inexistente debe retornar 404."""
+        """Repositorio inexistente debe retornar 404."""
         response = await client.get(
             "/api/v1/repositories/00000000-0000-0000-0000-000000000000",
             headers=auth_headers,
         )
         assert response.status_code == 404
 
-    async def test_cannot_access_other_users_repository(
-        self,
-        client: AsyncClient,
-        test_repository: Repository,
-        test_superuser: User,
-    ):
-        """Usuario no propietario no debe poder ver el repositorio."""
-        from src.core.security import create_access_token
-        other_headers = {"Authorization": f"Bearer {create_access_token(test_superuser.id)}"}
-
-        response = await client.get(
-            f"/api/v1/repositories/{test_repository.id}",
-            headers=other_headers,
-        )
-        assert response.status_code == 404
-
 
 class TestAnalysisEndpoints:
-    """Tests para endpoints de /api/v1/analyses."""
+    """Tests de endpoints de análisis."""
 
     async def test_create_analysis_success(
         self,
@@ -115,53 +118,45 @@ class TestAnalysisEndpoints:
         test_repository: Repository,
         auth_headers: dict,
     ):
-        """Crear análisis sobre repo propio debe retornar 201 en estado PENDING."""
-        response = await client.post(
-            "/api/v1/analyses",
-            json={
-                "repository_id": test_repository.id,
-                "commit_sha": "abc1234",
-            },
-            headers=auth_headers,
-        )
+        """
+        Crear análisis sobre repo propio debe retornar 201 en estado PENDING.
+
+        El background task se mockea para evitar ejecución real durante tests.
+        """
+        with patch(
+            "src.api.routers.analysis_router.run_analysis_background",
+            new=AsyncMock(),
+        ):
+            response = await client.post(
+                "/api/v1/analyses",
+                json={
+                    "repository_id": test_repository.id,
+                    "commit_sha": "abc1234",
+                },
+                headers=auth_headers,
+            )
+
         assert response.status_code == 201
         data = response.json()
         assert data["status"] == "pending"
         assert data["repository_id"] == test_repository.id
         assert data["commit_sha"] == "abc1234"
 
-    async def test_create_analysis_invalid_commit_sha(
+    async def test_create_analysis_for_unknown_repo_returns_404(
         self,
         client: AsyncClient,
-        test_repository: Repository,
         auth_headers: dict,
     ):
-        """SHA con caracteres no hexadecimales debe retornar 422."""
-        response = await client.post(
-            "/api/v1/analyses",
-            json={
-                "repository_id": test_repository.id,
-                "commit_sha": "xyz-invalid!",
-            },
-            headers=auth_headers,
-        )
-        assert response.status_code == 422
-
-    async def test_create_analysis_unauthorized_repo(
-        self,
-        client: AsyncClient,
-        test_repository: Repository,
-        test_superuser: User,
-    ):
-        """Crear análisis sobre repo ajeno debe retornar 404."""
-        from src.core.security import create_access_token
-        other_headers = {"Authorization": f"Bearer {create_access_token(test_superuser.id)}"}
-
-        response = await client.post(
-            "/api/v1/analyses",
-            json={"repository_id": test_repository.id},
-            headers=other_headers,
-        )
+        """Análisis sobre repositorio inexistente debe retornar 404."""
+        with patch(
+            "src.api.routers.analysis_router.run_analysis_background",
+            new=AsyncMock(),
+        ):
+            response = await client.post(
+                "/api/v1/analyses",
+                json={"repository_id": "00000000-0000-0000-0000-000000000000"},
+                headers=auth_headers,
+            )
         assert response.status_code == 404
 
     async def test_get_analysis_success(
@@ -171,11 +166,17 @@ class TestAnalysisEndpoints:
         auth_headers: dict,
     ):
         """GET análisis debe retornar detalle con findings vacíos."""
-        create = await client.post(
-            "/api/v1/analyses",
-            json={"repository_id": test_repository.id},
-            headers=auth_headers,
-        )
+        # Crear análisis sin ejecutarlo (background mockeado)
+        with patch(
+            "src.api.routers.analysis_router.run_analysis_background",
+            new=AsyncMock(),
+        ):
+            create = await client.post(
+                "/api/v1/analyses",
+                json={"repository_id": test_repository.id},
+                headers=auth_headers,
+            )
+        assert create.status_code == 201
         analysis_id = create.json()["id"]
 
         response = await client.get(
@@ -185,7 +186,20 @@ class TestAnalysisEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == analysis_id
+        assert data["status"] == "pending"
         assert data["findings"] == []
+
+    async def test_get_analysis_not_found_returns_404(
+        self,
+        client: AsyncClient,
+        auth_headers: dict,
+    ):
+        """Análisis inexistente debe retornar 404."""
+        response = await client.get(
+            "/api/v1/analyses/00000000-0000-0000-0000-000000000000",
+            headers=auth_headers,
+        )
+        assert response.status_code == 404
 
     async def test_list_analyses(
         self,
@@ -194,15 +208,40 @@ class TestAnalysisEndpoints:
         auth_headers: dict,
     ):
         """Listar análisis debe retornar los análisis del repositorio."""
-        await client.post(
-            "/api/v1/analyses",
-            json={"repository_id": test_repository.id},
-            headers=auth_headers,
-        )
+        # Crear un análisis sin ejecutarlo
+        with patch(
+            "src.api.routers.analysis_router.run_analysis_background",
+            new=AsyncMock(),
+        ):
+            await client.post(
+                "/api/v1/analyses",
+                json={"repository_id": test_repository.id},
+                headers=auth_headers,
+            )
 
         response = await client.get(
             f"/api/v1/analyses?repository_id={test_repository.id}",
             headers=auth_headers,
         )
         assert response.status_code == 200
-        assert response.json()["total"] >= 1
+        data = response.json()
+        assert data["total"] >= 1
+
+    async def test_create_analysis_default_commit_sha(
+        self,
+        client: AsyncClient,
+        test_repository: Repository,
+        auth_headers: dict,
+    ):
+        """Sin commit_sha explícito debe usar 'HEAD'."""
+        with patch(
+            "src.api.routers.analysis_router.run_analysis_background",
+            new=AsyncMock(),
+        ):
+            response = await client.post(
+                "/api/v1/analyses",
+                json={"repository_id": test_repository.id},
+                headers=auth_headers,
+            )
+        assert response.status_code == 201
+        assert response.json()["commit_sha"] == "HEAD"

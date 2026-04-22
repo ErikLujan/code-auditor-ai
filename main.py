@@ -10,10 +10,6 @@ import uuid
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
-from slowapi.util import get_remote_address
 
 from src.api.routers.auth_router import router as auth_router
 from src.api.routers.analysis_router import analysis_router, repos_router
@@ -33,9 +29,6 @@ setup_logging(
     environment=settings.app.environment,
 )
 logger = get_logger(__name__)
-
-# Rate limiter global basado en IP
-limiter = Limiter(key_func=get_remote_address)
 
 
 def create_app() -> FastAPI:
@@ -71,11 +64,6 @@ def _register_middlewares(app: FastAPI) -> None:
     Args:
         app: Instancia de FastAPI a configurar.
     """
-    # Rate limiting (debe ir antes de CORS)
-    app.state.limiter = limiter
-    app.add_middleware(SlowAPIMiddleware)
-
-    # CORS
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.api.allowed_origins_list,
@@ -84,7 +72,6 @@ def _register_middlewares(app: FastAPI) -> None:
         allow_headers=["Authorization", "Content-Type"],
     )
 
-    # Middleware de request ID y contexto de logging
     @app.middleware("http")
     async def request_context_middleware(request: Request, call_next):
         """
@@ -106,7 +93,6 @@ def _register_middlewares(app: FastAPI) -> None:
         finally:
             clear_request_context()
 
-    # Headers de seguridad
     @app.middleware("http")
     async def security_headers_middleware(request: Request, call_next):
         """
@@ -138,8 +124,6 @@ def _register_exception_handlers(app: FastAPI) -> None:
     Args:
         app: Instancia de FastAPI a configurar.
     """
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
     @app.exception_handler(AuthenticationError)
     async def authentication_error_handler(request: Request, exc: AuthenticationError):
         return JSONResponse(

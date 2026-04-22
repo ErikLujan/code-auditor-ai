@@ -4,19 +4,20 @@ Dependencies de FastAPI reutilizables.
 Provee funciones de dependencia para inyección en endpoints:
 autenticación JWT, obtención de usuario activo y paginación.
 """
+import time
 
-from fastapi import Depends, Header, Query
+from fastapi import Depends, Header, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.exceptions import AuthenticationError, AuthorizationError
+from src.core.exceptions import AuthenticationError, AuthorizationError, RateLimitExceededError
 from src.core.security import extract_user_id
 from src.db.database import get_db_session
 from src.db.models import User
 from src.db.repositories import UserRepository
 
 _bearer_scheme = HTTPBearer(auto_error=False)
-
+_rate_limits = {}
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
@@ -90,3 +91,30 @@ class PaginationParams:
         self.page = page
         self.page_size = page_size
         self.offset = (page - 1) * page_size
+
+class RateLimiter:
+    """
+    Dependencia de FastAPI para limitar la cantidad de peticiones.
+    """
+    def __init__(self, requests: int, window_seconds: int):
+        self.requests = requests
+        self.window_seconds = window_seconds
+
+    async def __call__(self, request: Request):
+        client_ip = request.client.host if request.client else "127.0.0.1"
+        key = f"rate_limit:{request.url.path}:{client_ip}"
+        
+        now = time.time()
+        
+        if key not in _rate_limits:
+            _rate_limits[key] = []
+            
+        _rate_limits[key] = [t for t in _rate_limits[key] if now - t < self.window_seconds]
+        
+        if len(_rate_limits[key]) >= self.requests:
+            retry_after = int(self.window_seconds - (now - _rate_limits[key][0]))
+            limit_type = f"{self.requests} peticiones por {self.window_seconds}s"
+            
+            raise RateLimitExceededError(limit_type=limit_type, retry_after=retry_after)
+            
+        _rate_limits[key].append(now)
