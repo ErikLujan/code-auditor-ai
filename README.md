@@ -1,4 +1,4 @@
-> > **Estado del Proyecto:** En Desarrollo (Fase 2 Completada)
+> **Estado del Proyecto:** En Desarrollo (Fase 2 Completada)
 > *Nota: Este es un README temporal y en construcción. Se irá actualizando conforme avance el desarrollo de las siguientes fases.*
 
 ## Visión General
@@ -35,23 +35,26 @@ El proyecto ha superado su **Fase 2**, dotando a la API de su motor de auditorí
 ```text
 src/
 ├── agents/
-│   ├── code_auditor_agent.py  # Orquestador de análisis
+│   ├── code_auditor_agent.py  # Orquestador principal de análisis
 │   ├── github_client.py       # Gestión efímera de repositorios
-│   ├── llm_client.py          # Cliente resiliente de IA
-│   └── static_analyzers/      # AST y Secret Detectors
+│   └── llm_client.py          # Cliente resiliente de IA (OpenRouter/Groq)
+├── analyzers/
+│   ├── ast_analyzer.py        # Detección de código estático (AST)
+│   ├── base.py                # Clase base abstracta para analizadores
+│   └── secret_detector.py     # Escáner de credenciales hardcodeadas
 ├── api/
-│   ├── deps.py                # Dependencias (auth, Rate Limiter)
-│   ├── routers/               # Endpoints REST
+│   ├── deps.py                # Dependencias (auth, Rate Limiter, etc.)
+│   ├── routers/               # Endpoints REST (auth, repos, análisis)
 │   └── schemas/               # Modelos de validación Pydantic
 ├── core/
-│   ├── config.py              # Settings centralizados
+│   ├── config.py              # Settings centralizados (Pydantic-Settings)
 │   ├── exceptions.py          # Jerarquía de errores del dominio
 │   ├── logging.py             # Configuración de structlog
 │   └── security.py            # Hashing, JWT y sanitización
 ├── db/
 │   ├── database.py            # Motor async y session manager
-│   ├── models.py              # Entidades ORM
-│   └── repositories.py        # Patrón Repository
+│   ├── models.py              # Entidades ORM (User, Repository, etc.)
+│   └── repositories.py        # Patrón Repository para acceso a datos
 └── services/
     └── analysis_service.py    # Lógica de negocio de auditorías
 ```
