@@ -7,7 +7,7 @@ los tests. El análisis real se testea en test_analysis_service.py.
 """
 
 import math
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import AsyncClient
@@ -124,8 +124,8 @@ class TestAnalysisEndpoints:
         El background task se mockea para evitar ejecución real durante tests.
         """
         with patch(
-            "src.api.routers.analysis_router.run_analysis_background",
-            new=AsyncMock(),
+            "src.api.routers.analysis_router.run_analysis_task.delay",
+            new=MagicMock(),
         ):
             response = await client.post(
                 "/api/v1/analyses",
@@ -149,8 +149,8 @@ class TestAnalysisEndpoints:
     ):
         """Análisis sobre repositorio inexistente debe retornar 404."""
         with patch(
-            "src.api.routers.analysis_router.run_analysis_background",
-            new=AsyncMock(),
+            "src.api.routers.analysis_router.run_analysis_task.delay",
+            new=MagicMock(),
         ):
             response = await client.post(
                 "/api/v1/analyses",
@@ -166,10 +166,9 @@ class TestAnalysisEndpoints:
         auth_headers: dict,
     ):
         """GET análisis debe retornar detalle con findings vacíos."""
-        # Crear análisis sin ejecutarlo (background mockeado)
         with patch(
-            "src.api.routers.analysis_router.run_analysis_background",
-            new=AsyncMock(),
+            "src.api.routers.analysis_router.run_analysis_task.delay",
+            new=MagicMock(),
         ):
             create = await client.post(
                 "/api/v1/analyses",
@@ -208,10 +207,9 @@ class TestAnalysisEndpoints:
         auth_headers: dict,
     ):
         """Listar análisis debe retornar los análisis del repositorio."""
-        # Crear un análisis sin ejecutarlo
         with patch(
-            "src.api.routers.analysis_router.run_analysis_background",
-            new=AsyncMock(),
+            "src.api.routers.analysis_router.run_analysis_task.delay",
+            new=MagicMock(),
         ):
             await client.post(
                 "/api/v1/analyses",
@@ -235,8 +233,8 @@ class TestAnalysisEndpoints:
     ):
         """Sin commit_sha explícito debe usar 'HEAD'."""
         with patch(
-            "src.api.routers.analysis_router.run_analysis_background",
-            new=AsyncMock(),
+            "src.api.routers.analysis_router.run_analysis_task.delay",
+            new=MagicMock(),
         ):
             response = await client.post(
                 "/api/v1/analyses",

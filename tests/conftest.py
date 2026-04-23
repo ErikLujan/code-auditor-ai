@@ -7,14 +7,19 @@ usuarios de prueba y tokens JWT para testing de endpoints.
 
 import pytest
 import pytest_asyncio
+
+from fastapi import Request
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from main import app
 from src.core.security import create_access_token, hash_password
+from src.api.deps import RateLimiter
 from src.db.base import Base
 from src.db.database import get_db_session
 from src.db.models import Repository, User
+
+from unittest.mock import AsyncMock
 
 # Engine SQLite en memoria para tests
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
@@ -166,3 +171,30 @@ async def test_repository(db_session: AsyncSession, test_user: User) -> Reposito
     await db_session.commit()
     await db_session.refresh(repo)
     return repo
+
+@pytest_asyncio.fixture(autouse=True)
+async def mock_redis_cache(monkeypatch):
+    """
+    Mockea globalmente el cliente de Redis para todos los tests.
+    
+    El parámetro `autouse=True` asegura que ningún test intente
+    conectarse accidentalmente a un servidor Redis real.
+    """
+    mock = AsyncMock()
+    mock.get.return_value = None 
+    
+    monkeypatch.setattr("src.core.cache.redis_client", mock)
+    
+    return mock
+
+@pytest.fixture(autouse=True)
+def disable_rate_limits(monkeypatch):
+    """
+    Desactiva el Rate Limiting globalmente durante los tests 
+    para evitar que fallen con error 429 al ejecutarse rápidamente.
+    """
+
+    async def dummy_rate_limit(self, request: Request):
+        return None
+        
+    monkeypatch.setattr("src.api.deps.RateLimiter.__call__", dummy_rate_limit)

@@ -19,7 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.agents.code_auditor_agent import AuditResult, CodeAuditorAgent
 from src.agents.github_client import GitHubClient
 from src.agents.llm_client import LLMClient
+from src.api.schemas.analysis_schemas import AnalysisDetailResponse, FindingResponse
 from src.core.config import get_settings
+from src.core.cache import set_cached_analysis
 from src.core.logging import get_logger
 from src.db.models import Analysis, AnalysisStatus, Finding
 from src.db.repositories import AnalysisRepository, FindingRepository
@@ -173,7 +175,9 @@ class AnalysisService:
         analysis.total_findings = len(result.findings)
         analysis.critical_count = critical_count
         analysis.high_count = high_count
+
         await self._session.commit()
+        await self._session.refresh(analysis)
 
         logger.info(
             "analysis_completed",
@@ -183,6 +187,23 @@ class AnalysisService:
             high=high_count,
             duration=round(duration_seconds, 2),
         )
+
+        try:
+            from src.core.cache import set_cached_analysis
+            from src.api.schemas.analysis_schemas import AnalysisDetailResponse, FindingResponse
+
+            db_findings = await self._finding_repo.list_by_analysis(analysis.id)
+
+            finding_dicts = [FindingResponse.model_validate(f).model_dump(mode="json") for f in db_findings]
+            analysis_dict = AnalysisDetailResponse(
+                **analysis.__dict__,
+                findings=finding_dicts
+            ).model_dump(mode="json")
+            await set_cached_analysis(str(analysis.repository_id), analysis.commit_sha, analysis_dict)
+            
+        except Exception as cache_exc:
+            logger.error("failed_to_serialize_cache", error=str(cache_exc), analysis_id=analysis.id)
+        # ---------------------------------------------
 
     async def _mark_failed(
         self,

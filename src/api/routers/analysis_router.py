@@ -8,9 +8,11 @@ Los usuarios solo pueden acceder a sus propios repositorios y análisis.
 import math
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import get_settings
+from src.core.cache import get_cached_analysis
 from src.api.deps import PaginationParams, get_current_user, RateLimiter
 from src.api.schemas.analysis_schemas import (
     AnalysisCreateRequest,
@@ -27,6 +29,7 @@ from src.db.database import get_db_session
 from src.db.models import User
 from src.db.repositories import AnalysisRepository, FindingRepository, RepositoryRepository
 from src.services.analysis_service import AnalysisService, build_auditor_agent
+from src.tasks.analysis_tasks import run_analysis_task
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -136,7 +139,6 @@ async def get_repository(
 
 @analysis_router.post(
     "",
-    response_model=AnalysisResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Iniciar análisis",
     dependencies=[Depends(RateLimiter(
@@ -146,7 +148,6 @@ async def get_repository(
 )
 async def create_analysis(
     payload: AnalysisCreateRequest,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> AnalysisResponse:
@@ -165,6 +166,15 @@ async def create_analysis(
             detail="Repositorio no encontrado",
         )
 
+    commit_target = payload.commit_sha or "HEAD"
+
+    cached_data = await get_cached_analysis(str(repository.id), commit_target)
+    if cached_data:
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=cached_data
+        )
+
     analysis_db = AnalysisRepository(session)
     analysis = await analysis_db.create(
         repository_id=payload.repository_id,
@@ -173,18 +183,18 @@ async def create_analysis(
 
     await session.commit()
 
-    background_tasks.add_task(
-        run_analysis_background,
+    run_analysis_task.delay(
         analysis_id=analysis.id,
         repo_full_name=repository.full_name,
         commit_sha=analysis.commit_sha,
     )
 
     logger.info(
-        "analysis_queued",
+        "analysis_queued_in_celery",
         analysis_id=analysis.id,
         repo=repository.full_name,
     )
+
     return AnalysisResponse.model_validate(analysis)
 
 
@@ -257,39 +267,3 @@ async def list_analyses(
         page_size=pagination.page_size,
         pages=math.ceil(len(analyses) / pagination.page_size) if analyses else 1,
     )
-
-
-# ── Background task ───────────────────────────────────────────────────────────
-
-async def run_analysis_background(
-    analysis_id: str,
-    repo_full_name: str,
-    commit_sha: str,
-) -> None:
-    """
-    Ejecuta el análisis en background con su propia sesión de BD.
-
-    Función pública (sin underscore) para que los tests puedan
-    parchearla con patch() sin romper el ciclo de vida del request.
-
-    Args:
-        analysis_id: UUID del análisis a ejecutar.
-        repo_full_name: Nombre del repositorio.
-        commit_sha: SHA del commit a analizar.
-    """
-    from src.db.database import AsyncSessionFactory
-
-    logger.info(
-        "background_analysis_start",
-        analysis_id=analysis_id,
-        repo=repo_full_name,
-    )
-
-    async with AsyncSessionFactory() as session:
-        agent = build_auditor_agent()
-        service = AnalysisService(session=session, agent=agent)
-        await service.execute_analysis(
-            analysis_id=analysis_id,
-            repo_full_name=repo_full_name,
-            commit_sha=commit_sha,
-        )

@@ -27,3 +27,25 @@ coverage.xml
 .vscode/
 .idea/
 claude.md
+
+# Logs
+*.log
+logs/
+
+# Archivos del sistema operativo
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Caché de Linters y Type Checkers 
+.ruff_cache/
+.mypy_cache/
+
+# Archivos de estado de Celery
+celerybeat-schedule
+celerybeat.pid
+*.pid
+
+# Bases de datos locales
+*.sqlite3
+*.db
