@@ -1,4 +1,5 @@
-> **Estado del Proyecto:** En Desarrollo (Fase 2 Completada)
+> **Estado del Proyecto:** En Desarrollo (Fase 3 Completada)
+>
 > *Nota: Este es un README temporal y en construcción. Se irá actualizando conforme avance el desarrollo de las siguientes fases.*
 
 ## Visión General
@@ -7,56 +8,61 @@ Desarrollo de un agente de IA especializado en el análisis automático de repos
 
 El objetivo final es generar reportes priorizados con recomendaciones accionables, integrables en pipelines CI/CD y accesibles vía dashboard web.
 
-## Estado Actual: Fase 2 (Motor de Análisis e IA) Completada
+## Estado Actual: Fase 3 (Escalabilidad, Automatización y Webhooks) Completada
 
-El proyecto ha superado su **Fase 2**, dotando a la API de su motor de auditoría central, análisis estático y capacidades de Inteligencia Artificial.
+El proyecto ha superado su **Fase 3**, transformando la API en un sistema distribuido capaz de procesar auditorías pesadas en segundo plano, manejar eventos en tiempo real y optimizar recursos mediante caché.
 
 **Características implementadas:**
-* **API RESTful y Autenticación:** Base robusta en **FastAPI** con sistema JWT seguro (bcrypt).
-* **Motor de Análisis Híbrido:** * **Análisis Estático (AST y Regex):** Detección de secretos hardcodeados, funciones excesivamente largas y bloques `except` silenciosos.
-* **Análisis Dinámico con LLM:** Integración con proveedores compatibles con OpenAI (OpenRouter, Groq) usando modelos avanzados (ej. Llama 3) para detectar Inyecciones SQL, problemas de arquitectura (SOLID) y deuda técnica.
-* **Integración con GitHub:** Clonado seguro y efímero de repositorios. El sistema descarga, analiza y limpia el almacenamiento local automáticamente (`stateless`).
-* **Resiliencia y Asincronismo:** Tareas ejecutadas en segundo plano (`BackgroundTasks`), con manejo de reintentos (backoff) para APIs externas y *graceful degradation* (si el LLM falla, el reporte estático se guarda igual).
-* **Base de Datos y Transacciones:** PostgreSQL (Supabase) con manejo seguro de sesiones asíncronas y control estricto de excepciones.
-* **Seguridad y Rate Limiting:** Implementación de Rate Limiting nativo inyectado por dependencias para proteger endpoints críticos y controlar el gasto de tokens.
+* **Colas Distribuidas (Celery + Redis):** Transición de tareas en memoria (`BackgroundTasks`) a un worker independiente (Celery) orquestado por Redis, permitiendo análisis concurrentes sin bloquear la API.
+* **Caché Inteligente:** Implementación de Redis para almacenar resultados de auditorías. Evita la re-ejecución de análisis costosos (AST/LLM) si el commit del repositorio no ha cambiado (`cache_hit`).
+* **Integración Activa (Webhooks):** Endpoint dedicado para la recepción automática de eventos push de GitHub, validado mediante firmas criptográficas estrictas (HMAC-SHA256) para evitar suplantaciones de identidad.
+* **Observabilidad:** Integración de Prometheus para la exposición de métricas de salud y rendimiento del sistema.
+* **Motor de Análisis Híbrido (Fase 2):** Análisis estático nativo (AST, Regex) y análisis dinámico con modelos LLM avanzados para detección de inyecciones SQL, deuda técnica y violaciones de diseño.
+* **Base de Datos y Autenticación:** PostgreSQL (Supabase) asíncrono y sistema de autenticación JWT robusto.
+* **Testing Riguroso:** Suite de pruebas con 110 tests de integración y unitarios pasando exitosamente, alcanzando un ~80% de cobertura del código (pytest).
 
 ## Stack Tecnológico Actual
 
 * **Backend:** Python, FastAPI
+* **Procesamiento Asíncrono:** Celery
+* **Mensajería y Caché:** Redis
 * **IA y Análisis:** API compatible con OpenAI (OpenRouter/Groq), analizadores AST nativos de Python.
 * **ORM & BD:** SQLAlchemy (Async), Alembic, PostgreSQL (Supabase)
 * **Validación:** Pydantic, Pydantic-Settings
-* **Seguridad:** PyJWT, passlib/bcrypt
-* **Testing:** pytest, pytest-cov, aiosqlite
+* **Seguridad:** PyJWT, passlib/bcrypt, validación HMAC-SHA256
+* **Observabilidad:** Prometheus
+* **Testing:** pytest, pytest-cov, unittest.mock, aiosqlite
 
-*(En fases posteriores se incorporará Celery, Redis para colas distribuidas y posiblemente un frontend web).*
-
-## Estructura del Proyecto (Fase 1)
+## Estructura del Proyecto (Fase 3)
 ```text
 src/
 ├── agents/
 │   ├── code_auditor_agent.py  # Orquestador principal de análisis
 │   ├── github_client.py       # Gestión efímera de repositorios
-│   └── llm_client.py          # Cliente resiliente de IA (OpenRouter/Groq)
+│   └── llm_client.py          # Cliente resiliente de IA
 ├── analyzers/
 │   ├── ast_analyzer.py        # Detección de código estático (AST)
-│   ├── base.py                # Clase base abstracta para analizadores
+│   ├── base.py                # Clase base abstracta
 │   └── secret_detector.py     # Escáner de credenciales hardcodeadas
 ├── api/
-│   ├── deps.py                # Dependencias (auth, Rate Limiter, etc.)
-│   ├── routers/               # Endpoints REST (auth, repos, análisis)
-│   └── schemas/               # Modelos de validación Pydantic
+│   ├── deps.py                # Dependencias (auth, Rate Limiter)
+│   ├── routers/               # Endpoints REST (auth, repos, analyses, webhooks)
+│   └── schemas/               # Modelos Pydantic
 ├── core/
-│   ├── config.py              # Settings centralizados (Pydantic-Settings)
-│   ├── exceptions.py          # Jerarquía de errores del dominio
+│   ├── cache.py               # Gestión de caché en Redis
+│   ├── celery_app.py          # Configuración del worker distribuido
+│   ├── config.py              # Settings centralizados
+│   ├── exceptions.py          # Jerarquía de errores
 │   ├── logging.py             # Configuración de structlog
-│   └── security.py            # Hashing, JWT y sanitización
+│   └── security.py            # Hashing, JWT y validaciones criptográficas
 ├── db/
 │   ├── database.py            # Motor async y session manager
-│   ├── models.py              # Entidades ORM (User, Repository, etc.)
-│   └── repositories.py        # Patrón Repository para acceso a datos
-└── services/
-    └── analysis_service.py    # Lógica de negocio de auditorías
+│   ├── models.py              # Entidades ORM
+│   └── repositories.py        # Acceso a datos
+├── services/
+│   └── analysis_service.py    # Lógica de negocio de auditorías
+└── tasks/
+    └── analysis_tasks.py      # Tareas asíncronas de Celery
 tests/
 ├── conftest.py                 # Fixtures globales (BD SQLite en memoria, cliente HTTP mockeado)
 ├── unit/                       # Pruebas aisladas de componentes core
@@ -67,14 +73,15 @@ tests/
 └── integration/                # Pruebas de integración, endpoints y base de datos
     ├── test_analysis_flow.py   # Orquestación del servicio de análisis con sesiones de BD
     ├── test_auth.py            # Flujos completos de registro, login y refresh de tokens
-    └── test_repositories.py    # CRUD de repositorios y encolado correcto de auditorías
+    ├── test_repositories.py    # CRUD de repositorios y encolado correcto de auditorías
+    └── test_webhook.py         # Validación criptográfica y recepción de eventos
 ```
 
 ---
 
-## Próximos Pasos (Fase 3: Escalabilidad y Automatización)
-Con el motor de análisis operativo, el enfoque se desplaza a escalar el procesamiento y automatizar la recepción de código:
+## Próximos Pasos (Fase 4: Interfaz, Integración y Despliegue))
+Con un backend escalable y automatizado, la siguiente fase se centrará en transformar el motor en un producto interactivo y prepararlo para entornos productivos:
 
-* **Colas Distribuidas:** Reemplazar `BackgroundTasks` por **Celery + Redis** para manejar múltiples análisis concurrentes de repositorios pesados sin bloquear la API.
-* **Webhooks de GitHub:** Crear endpoints para recibir eventos `push` o `pull_request` y disparar auditorías automáticamente en pipelines CI/CD.
-* **Dashboard / CLI:** Desarrollo de una interfaz para visualizar las métricas y hallazgos de forma amigable.
+* **Desarrollo Frontend (Dashboard SPA):** Construcción de una interfaz web (posiblemente Angular/React) para visualizar métricas, detallar hallazgos y administrar repositorios.
+* **Integración Activa con GitHub:** Configurar el agente como una GitHub App para que pueda publicar comentarios directamente en las líneas de código afectadas dentro de los Pull Requests.
+* **Infraestructura CI/CD y Dockerización:** Empaquetar FastAPI, Celery y Redis en contenedores Docker y configurar flujos automatizados de GitHub Actions para asegurar despliegues continuos.
