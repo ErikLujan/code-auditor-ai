@@ -57,6 +57,17 @@ src/
 │   └── repositories.py        # Patrón Repository para acceso a datos
 └── services/
     └── analysis_service.py    # Lógica de negocio de auditorías
+tests/
+├── conftest.py                 # Fixtures globales (BD SQLite en memoria, cliente HTTP mockeado)
+├── unit/                       # Pruebas aisladas de componentes core
+│   ├── test_ast_analyzer.py    # Validación de reglas AST, anti-patrones y casos borde
+│   ├── test_llm_client.py      # Resiliencia de IA y parseo estricto (API OpenAI mockeada)
+│   ├── test_secret_detector.py # Verificación de regex para credenciales y falsos positivos
+│   └── test_security.py        # Validaciones de JWT, hashing de contraseñas y sanitización
+└── integration/                # Pruebas de integración, endpoints y base de datos
+    ├── test_analysis_flow.py   # Orquestación del servicio de análisis con sesiones de BD
+    ├── test_auth.py            # Flujos completos de registro, login y refresh de tokens
+    └── test_repositories.py    # CRUD de repositorios y encolado correcto de auditorías
 ```
 
 ---
