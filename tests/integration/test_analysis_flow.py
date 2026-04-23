@@ -108,7 +108,6 @@ async def test_execute_analysis_completes_successfully(
     """
     from src.services.analysis_service import AnalysisService
 
-    # Crear repositorio y análisis directamente en BD
     repo_db = RepositoryRepository(db_session)
     repo = await repo_db.create(
         owner_id=test_user.id,
@@ -333,8 +332,8 @@ async def test_create_analysis_endpoint_queues_background_task(
     El background task se mockea para no ejecutar análisis real.
     """
     with patch(
-        "src.api.routers.analysis_router.run_analysis_background",
-        new=AsyncMock(),
+        "src.api.routers.analysis_router.run_analysis_task.delay",
+        new=MagicMock(),
     ) as mock_bg:
         response = await client.post(
             "/api/v1/analyses",

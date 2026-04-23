@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 
 from src.api.routers.auth_router import router as auth_router
 from src.api.routers.analysis_router import analysis_router, repos_router
+from src.api.routers.webhook_router import router as webhook_router
 from src.core.config import get_settings
 from src.core.exceptions import (
     AuthenticationError,
@@ -22,6 +23,8 @@ from src.core.exceptions import (
     ValidationError,
 )
 from src.core.logging import get_logger, set_request_context, clear_request_context, setup_logging
+
+from prometheus_fastapi_instrumentator import Instrumentator
 
 settings = get_settings()
 setup_logging(
@@ -71,6 +74,8 @@ def _register_middlewares(app: FastAPI) -> None:
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
     )
+
+    Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
     @app.middleware("http")
     async def request_context_middleware(request: Request, call_next):
@@ -175,6 +180,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(auth_router, prefix=prefix)
     app.include_router(repos_router, prefix=prefix)
     app.include_router(analysis_router, prefix=prefix)
+    app.include_router(webhook_router, prefix=prefix)
 
     @app.get("/health", tags=["Health"])
     async def health_check():

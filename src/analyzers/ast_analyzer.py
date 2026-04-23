@@ -24,8 +24,8 @@ logger = get_logger(__name__)
 _GENERIC_VAR_NAMES: frozenset[str] = frozenset({
     "x", "y", "z", "n", "i", "j", "k",
     "tmp", "temp", "data", "val", "value",
-    "obj", "item", "result", "res", "ret",
-    "foo", "bar", "baz",
+    "obj", "item", "result", "res", 
+    "ret", "foo", "bar", "baz",
 })
 
 _SQL_INJECTION_PATTERNS: frozenset[str] = frozenset({
@@ -36,10 +36,9 @@ _SQL_INJECTION_PATTERNS: frozenset[str] = frozenset({
 class ASTAnalyzer(BaseAnalyzer):
     """
     Analizador estático de Python usando el módulo ast de la stdlib.
-
     Recorre el AST de cada archivo .py detectando anti-patrones de
     calidad, arquitectura y seguridad sin ejecutar el código.
-
+    
     Args:
         max_function_lines: Líneas máximas antes de reportar función larga.
         max_cyclomatic_complexity: Umbral de complejidad ciclomática.
@@ -57,13 +56,25 @@ class ASTAnalyzer(BaseAnalyzer):
     def name(self) -> str:
         return "ast_analyzer"
 
+    def _get_line_end(self, node: ast.AST) -> int | None:
+        """
+        Extrae la línea de finalización de un nodo AST de forma segura.
+        
+        Args:
+            node (ast.AST): Nodo del árbol de sintaxis a evaluar.
+            
+        Returns:
+            int | None: Número de línea final o None si no está disponible.
+        """
+        return getattr(node, "end_lineno", None)
+
     async def analyze(self, context: AnalysisContext) -> AnalyzerResult:
         """
         Analiza todos los archivos Python del repositorio.
-
+        
         Args:
             context: Contexto con ruta del repositorio.
-
+            
         Returns:
             Resultado con hallazgos de calidad/arquitectura.
         """
@@ -99,10 +110,10 @@ class ASTAnalyzer(BaseAnalyzer):
     def _collect_python_files(self, context: AnalysisContext) -> list[Path]:
         """
         Recolecta archivos .py del repositorio ignorando carpetas irrelevantes.
-
+        
         Args:
             context: Contexto con ruta del repositorio y archivos target.
-
+            
         Returns:
             Lista de rutas absolutas a archivos Python.
         """
@@ -124,7 +135,7 @@ class ASTAnalyzer(BaseAnalyzer):
     def _analyze_file(self, file_path: Path, repo_root: Path) -> list[RawFinding]:
         """
         Analiza un archivo Python individual.
-
+        
         Args:
             file_path: Ruta absoluta al archivo.
             repo_root: Raíz del repositorio para calcular rutas relativas.
@@ -166,6 +177,7 @@ class ASTAnalyzer(BaseAnalyzer):
                             ),
                             file_path=file_path,
                             line_start=node.lineno,
+                            line_end=self._get_line_end(node),  
                             rule_id="AST-Q001",
                             recommendation=(
                                 "Importar solo los nombres necesarios explícitamente: "
@@ -204,7 +216,7 @@ class ASTAnalyzer(BaseAnalyzer):
             return []
 
         start = node.lineno
-        end = node.end_lineno or start
+        end = self._get_line_end(node) or start
         func_lines = end - start + 1
 
         if func_lines <= self._max_function_lines:
@@ -255,6 +267,7 @@ class ASTAnalyzer(BaseAnalyzer):
             description=f"La función pública '{node.name}' no tiene documentación.",
             file_path=file_path,
             line_start=node.lineno,
+            line_end=self._get_line_end(node),  
             rule_id="AST-Q002",
             recommendation=(
                 "Agregar docstring que describa propósito, parámetros y retorno. "
@@ -298,6 +311,7 @@ class ASTAnalyzer(BaseAnalyzer):
             description=f"En '{node.name}': {'; '.join(parts)}.",
             file_path=file_path,
             line_start=node.lineno,
+            line_end=self._get_line_end(node),  
             rule_id="AST-Q003",
             recommendation=(
                 "Agregar type hints a todos los parámetros y al tipo de retorno. "
@@ -311,16 +325,17 @@ class ASTAnalyzer(BaseAnalyzer):
         file_path: str,
     ) -> list[RawFinding]:
         """Detecta variables con nombres genéricos dentro de funciones."""
-        generic_found: list[tuple[str, int]] = []
+        generic_found: list[tuple[str, int, int | None]] = []
 
         for child in ast.walk(node):
             if isinstance(child, ast.Assign):
+                line_end = self._get_line_end(child)
                 for target in child.targets:
                     if isinstance(target, ast.Name) and target.id in _GENERIC_VAR_NAMES:
-                        generic_found.append((target.id, child.lineno))
+                        generic_found.append((target.id, child.lineno, line_end))
 
         findings: list[RawFinding] = []
-        for var_name, line_no in generic_found:
+        for var_name, line_no, line_end in generic_found:
             findings.append(self._make_finding(
                 category=FindingCategory.QUALITY,
                 severity=FindingSeverity.LOW,
@@ -330,6 +345,7 @@ class ASTAnalyzer(BaseAnalyzer):
                 ),
                 file_path=file_path,
                 line_start=line_no,
+                line_end=line_end,  
                 rule_id="AST-Q004",
                 recommendation=(
                     f"Renombrar '{var_name}' a algo que describa su contenido y propósito."
@@ -374,6 +390,7 @@ class ASTAnalyzer(BaseAnalyzer):
             ),
             file_path=file_path,
             line_start=node.lineno,
+            line_end=self._get_line_end(node),  
             rule_id="AST-Q005",
             recommendation=(
                 "Reducir ramas condicionales extrayendo lógica a funciones auxiliares. "
@@ -397,6 +414,7 @@ class ASTAnalyzer(BaseAnalyzer):
                     ),
                     file_path=file_path,
                     line_start=node.lineno,
+                    line_end=self._get_line_end(node),  
                     rule_id="AST-S001",
                     recommendation=(
                         "Especificar el tipo de excepción: 'except ValueError:' o "
@@ -408,7 +426,6 @@ class ASTAnalyzer(BaseAnalyzer):
     def _check_sql_string_format(self, tree: ast.AST, file_path: str) -> list[RawFinding]:
         """
         Detecta posibles inyecciones SQL por concatenación/formato de strings.
-
         Busca patrones como: cursor.execute("SELECT..." % user_input)
         o cursor.execute(f"SELECT...{variable}")
         """
@@ -456,6 +473,7 @@ class ASTAnalyzer(BaseAnalyzer):
                 ),
                 file_path=file_path,
                 line_start=node.lineno,
+                line_end=self._get_line_end(node),
                 rule_id="AST-S002",
                 recommendation=(
                     "Usar queries parametrizadas: cursor.execute('SELECT * FROM t WHERE id = %s', (user_id,)). "
